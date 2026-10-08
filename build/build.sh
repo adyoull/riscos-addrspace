@@ -7,7 +7,7 @@
 # UnixLib 5.0.3.3, it has no heap dynamic area (no __dynamic_da_name: it
 # mustn't add to what it measures), and no build path or unwanted name is
 # left in the shipped image.
-# Needs the GCCSDK GCC 10.2 toolchain with UnixLib 5.0.3.3 (docs/TOOLCHAIN.md).
+# Needs the GCCSDK GCC 10.2 toolchain with UnixLib 5.0.3.3 (README.md, Building).
 set -e
 . "$(dirname "$0")/env.sh"
 mkdir -p "$OUT"
