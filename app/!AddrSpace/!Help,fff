@@ -1,12 +1,12 @@
-!AddrSpace - what is using the logical address space     0.1.0-test1
-=====================================================================
+!AddrSpace - what is using the logical address space     0.1.0
+===============================================================
 
 AddrSpace shows what is using RISC OS's logical address space, the
 4GB of addresses that all memory has to be fitted into. When it runs
 out, programs stop with "Unable to allocate logical address space"
 however much memory is free.
 
-This is a test build. Please report problems at
+This is the first release. Please report problems at
 https://github.com/adyoull/riscos-addrspace/issues
 
 Why it runs out
