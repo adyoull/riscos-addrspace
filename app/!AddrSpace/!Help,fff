@@ -1,0 +1,139 @@
+!AddrSpace - what is using the logical address space     0.1.0-test1
+=====================================================================
+
+AddrSpace shows what is using RISC OS's logical address space, the
+4GB of addresses that all memory has to be fitted into. When it runs
+out, programs stop with "Unable to allocate logical address space"
+however much memory is free.
+
+This is a test build. Please report problems at
+https://github.com/adyoull/riscos-addrspace/issues
+
+Why it runs out
+---------------
+Every dynamic area (the blocks of memory listed in the Task Manager's
+window) takes a range of addresses as big as the most it can ever grow
+to, when it is made, however little it holds. So an area that holds
+4MB but could grow to 128MB uses 128MB of address space.
+
+RISC OS 5 caps that maximum for each new area (the DALimit setting in
+Choices: 128MB unless it has been changed). Programs built with
+UnixLib (Matinee, ReelEGL, Reel and many ports) usually keep their
+memory in an area called "<program> Heap", which
+then reserves 128MB, and "<program> Heap 2", "Heap 3"... as it grows,
+another 128MB each. A few programs like that running together, on a
+machine with a lot of memory (whose own areas, such as the RAM disc or
+the screen, may be large too), can use up the 4GB.
+
+Starting
+--------
+Double-click !AddrSpace: its icon (a column of memory under a
+magnifying glass) appears on the icon bar. Click Select on it to open
+its window.
+
+The window
+----------
+The first three lines are the totals:
+
+  - how many dynamic areas there are, how much address space they
+    reserve, and how much memory is in them
+  - how much address space is free, once measured (see below), and
+    how many more areas of the largest size a new area can have would
+    fit
+  - the most a new area can reserve now (the cap), how many tasks are
+    running, and how often the list is read
+
+Then the list of areas, read again every 2 seconds:
+
+  Name       the area's name
+  Owner      the task it probably belongs to: a running task whose
+             name its name starts with. "RISC OS" for RISC OS's own
+             areas. A name in brackets, in red, is a program that
+             isn't running.
+  Size       the memory in it now
+  Reserved   the address space it takes: the most it can grow to
+             (twice that for a doubly-mapped area)
+  Base       where its addresses start
+  Notes      what changed, and what it is
+
+Click a column's heading to sort the list by it; click again to turn it
+round. At first it is sorted by Reserved, the biggest first.
+
+Changes are coloured, for 30 seconds:
+
+  green        a new area
+  yellow       an area that grew (Notes says from what)
+  blue         an area that shrank
+  grey         an area that has gone
+
+A UnixLib program's heap whose program isn't running is shown in red,
+"left behind?". When a program quits, its areas should go with it; one
+that stays is still taking its address space. (It may also be a program
+whose task name isn't the start of its heap's name: check the Task
+Manager.) "mmap#" areas are made by the ARMEABISupport module for a
+program's memory; they too should go when the program quits.
+
+The menu
+--------
+Click Menu on the icon or the window.
+
+  Info                 about AddrSpace
+  Read every           how often the list is read: 1 to 30 seconds
+  Read now             read it now
+  Measure free space   measures the free address space, the only sure
+                       way: AddrSpace makes empty areas, each as big as
+                       RISC OS will allow (halving the size down to 1MB
+                       when there's no room), until no more will fit,
+                       adds up their sizes, then removes them all. It
+                       takes a moment; while it does, there is no
+                       address space left for anything else.
+  Save list            writes everything (the totals, the list, the
+                       totals for each owner and the tasks running) to
+                       a text file, <Wimp$ScrapDir>.AddrSpaceList, and
+                       opens it
+  Log changes          writes the list, then every change as it's seen
+                       (with the time), to <Wimp$ScrapDir>.AddrSpaceLog.
+                       It keeps logging while the window is closed, and
+                       each Measure free space is logged too.
+  Quit
+
+To log from the moment AddrSpace starts (for example from the boot
+sequence), *Set AddrSpace$Log on before running it.
+
+Finding what uses the address space
+-----------------------------------
+  1. After starting the computer, run AddrSpace, Measure free space,
+     and Save list.
+  2. Turn on Log changes, then start the programs one at a time,
+     measuring the free space after each.
+  3. When "Unable to allocate logical address space" appears, measure
+     again and Save list.
+  4. Quit the programs one at a time: the areas each one leaves behind
+     show in the log as not gone.
+
+The saved list and the log are plain text, to send with a report.
+
+AddrSpace itself
+----------------
+AddrSpace doesn't change what it measures: its memory is in its own
+WimpSlot (it makes no dynamic area), and the only areas it makes are
+Measure free space's, which it removes at once. Like every UnixLib
+program, its stack is kept by the ARMEABISupport module.
+
+It reads the list with OS_DynamicArea 3 and 24 (2 on a RISC OS without
+24), the cap with OS_DynamicArea 8, and the tasks with
+TaskManager_EnumerateTasks.
+
+Needs
+-----
+  - RISC OS 5 on an ARMv7 machine (Raspberry Pi 2, 3, 4, 400 and so on)
+  - SharedUnixLibrary 1.16 or later and ARMEABISupport (both from
+    PackMan)
+
+Licence
+-------
+AddrSpace is free software, under the GNU General Public License,
+version 2 or later (docs.Licences.AddrSpace). Its source is in
+docs.source and at https://github.com/adyoull/riscos-addrspace
+
+Andrew Youll

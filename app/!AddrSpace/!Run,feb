@@ -1,0 +1,16 @@
+| !Run for !AddrSpace (what is using RISC OS's logical address space)
+| Puts AddrSpace on the icon bar: Select on it opens its window.
+Set AddrSpace$Dir <Obey$Dir>
+IconSprites <AddrSpace$Dir>.!Sprites
+
+RMEnsure SharedUnixLibrary 1.16 IfThere System:Modules.SharedULib Then RMLoad System:Modules.SharedULib
+RMEnsure SharedUnixLibrary 1.16 Error AddrSpace needs SharedUnixLibrary 1.16 or later. Install it with PackMan.
+RMEnsure ARMEABISupport 0 IfThere System:Modules.ARMEABISupport Then RMLoad System:Modules.ARMEABISupport
+RMEnsure ARMEABISupport 0 Error AddrSpace needs the ARMEABISupport module. Install it with PackMan.
+
+| AddrSpace's memory is all in its WimpSlot: it makes no dynamic area of
+| its own, so it doesn't change what it shows. To log every change from
+| the moment it starts (for example when it's started at boot):
+| *Set AddrSpace$Log on before running it.
+WimpSlot -min 512K -max 512K
+Run <AddrSpace$Dir>.!RunImage %*0

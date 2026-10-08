@@ -1,0 +1,3 @@
+| !Boot for !AddrSpace
+If "<AddrSpace$Dir>"="" Then Set AddrSpace$Dir <Obey$Dir>
+IconSprites <Obey$Dir>.!Sprites
