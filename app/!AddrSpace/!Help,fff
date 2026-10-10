@@ -1,12 +1,12 @@
-!AddrSpace - what is using the logical address space     0.1.0
-===============================================================
+!AddrSpace - what is using the logical address space     0.1.1-test1
+=====================================================================
 
 AddrSpace shows what is using RISC OS's logical address space, the
 4GB of addresses that all memory has to be fitted into. When it runs
 out, programs stop with "Unable to allocate logical address space"
 however much memory is free.
 
-This is the first release. Please report problems at
+This is a test build of 0.1.1. Please report problems at
 https://github.com/adyoull/riscos-addrspace/issues
 
 Why it runs out
@@ -38,18 +38,19 @@ The first three lines are the totals:
   - how many dynamic areas there are, how much address space they
     reserve, and how much memory is in them
   - how much address space is free, once measured (see below), and
-    how many more areas of the largest size a new area can have would
-    fit
+    the largest free piece of it: the biggest area that could be made.
+    Free space in several pieces can't all go to one area: with 446MB
+    free in pieces of 256MB and 190MB, a 512MB area won't fit.
   - the most a new area can reserve now (the cap), how many tasks are
     running, and how often the list is read
 
 Then the list of areas, read again every 2 seconds:
 
   Name       the area's name
-  Owner      the task it probably belongs to: a running task whose
-             name its name starts with. "RISC OS" for RISC OS's own
-             areas. A name in brackets, in red, is a program that
-             isn't running.
+  Owner      what it probably belongs to: a running task whose name
+             its name starts with, or else a module (see below).
+             "RISC OS" for RISC OS's own areas. A name in brackets, in
+             red, is a program that isn't running.
   Size       the memory in it now
   Reserved   the address space it takes: the most it can grow to
              (twice that for a doubly-mapped area)
@@ -73,6 +74,11 @@ whose task name isn't the start of its heap's name: check the Task
 Manager.) "mmap#" areas are made by the ARMEABISupport module for a
 program's memory; they too should go when the program quits.
 
+Modules make areas too. Some are known by name: "mmap#" and "UnixLib
+stacks" are ARMEABISupport's, "Shared Libraries" is SOManager's.
+Others are put down to the module whose name theirs starts with, such
+as StreamManager's "StreamManager heap". Notes says "a module's area".
+
 The menu
 --------
 Click Menu on the icon or the window.
@@ -86,7 +92,13 @@ Click Menu on the icon or the window.
                        when there's no room), until no more will fit,
                        adds up their sizes, then removes them all. It
                        takes a moment; while it does, there is no
-                       address space left for anything else.
+                       address space left for anything else. The first
+                       area that fits gives the largest free piece:
+                       "between 256MB and 512MB" when 512MB didn't fit
+                       but 256MB did, or "at least 128MB" when the
+                       first size tried fitted (often the most a new
+                       area can reserve, so no bigger area can be made
+                       anyway).
   Save list            writes everything (the totals, the list, the
                        totals for each owner and the tasks running) to
                        a text file, <Wimp$ScrapDir>.AddrSpaceList, and
@@ -121,8 +133,8 @@ Measure free space's, which it removes at once. Like every UnixLib
 program, its stack is kept by the ARMEABISupport module.
 
 It reads the list with OS_DynamicArea 3 and 24 (2 on a RISC OS without
-24), the cap with OS_DynamicArea 8, and the tasks with
-TaskManager_EnumerateTasks.
+24), the cap with OS_DynamicArea 8, the tasks with
+TaskManager_EnumerateTasks, and the modules with OS_Module 12.
 
 Needs
 -----

@@ -77,9 +77,9 @@
 #define HEAD_H    44
 #define ROW_H     40
 #define ROWS_Y1   (HEAD_Y1 - HEAD_H - 4)
-static const int col_x[COL_COUNT + 1] = { 8, 400, 640, 824, 1008, 1172, 2000 };
+static const int col_x[COL_COUNT + 1] = { 8, 400, 680, 864, 1048, 1212, 2040 };
 static const char *const col_name[COL_COUNT] = { "Name", "Owner", "Size", "Reserved", "Base", "Notes" };
-#define WA_W      (2000 + 8)
+#define WA_W      (2040 + 8)
 
 static _kernel_oserror *swi(int n, _kernel_swi_regs *r) { return _kernel_swi(n, r, r); }
 
@@ -201,10 +201,11 @@ static void make_lines(void)
     if (S.probe_failed) {
         snprintf(S.line[1], sizeof(S.line[1]), "Free, at %s: none. Not even a 1MB area could be made.", S.probe_when);
     } else if (S.probed) {
+        char big[80];
         fmt_mb(S.probe.total, a, sizeof(a));
-        fmt_mb(S.probe.biggest, b, sizeof(b));
-        snprintf(S.line[1], sizeof(S.line[1]), "Free, at %s: %s%s. Room for %d more area%s of %s.", S.probe_when,
-                 S.probe.full ? "at least " : "", a, S.probe.n_biggest, S.probe.n_biggest == 1 ? "" : "s", b);
+        areas_largest(&S.probe, S.have ? s->clamp[1] : 0, big, sizeof(big));
+        snprintf(S.line[1], sizeof(S.line[1]), "Free, at %s: %s%s. The largest free piece: %s.", S.probe_when,
+                 S.probe.full ? "at least " : "", a, big);
     } else {
         snprintf(S.line[1], sizeof(S.line[1]), "Free: not measured yet (choose Measure free space on the menu).");
     }
@@ -291,13 +292,17 @@ static void measure(void)
         report("%d of the areas made to measure the free space couldn't be removed (they're called \"" PROBE_NAME
                "\").", S.probe.left);
     if (S.logging) {
-        char path[300], a[40], b[40];
+        char path[300], a[40], big[80];
         FILE *f;
         if (scrap_path("AddrSpaceLog", path, sizeof(path)) && (f = fopen(path, "a")) != NULL) {
-            fmt_mb(S.probe.total, a, sizeof(a));
-            fmt_mb(S.probe.biggest, b, sizeof(b));
-            fprintf(f, "%s  free: %s%s, room for %d more areas of %s\n", S.probe_when, S.probe.full ? "at least " : "",
-                    S.probe_failed ? "none" : a, S.probe.n_biggest, b);
+            if (S.probe_failed) {
+                fprintf(f, "%s  free: none\n", S.probe_when);
+            } else {
+                fmt_mb(S.probe.total, a, sizeof(a));
+                areas_largest(&S.probe, S.have ? s->clamp[1] : 0, big, sizeof(big));
+                fprintf(f, "%s  free: %s%s; the largest free piece: %s\n", S.probe_when,
+                        S.probe.full ? "at least " : "", a, big);
+            }
             fclose(f);
         }
     }

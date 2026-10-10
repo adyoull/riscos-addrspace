@@ -10,6 +10,7 @@
 #define FAKE_AREAS  700
 #define FAKE_TASKS  40
 #define FAKE_PIECES 16
+#define FAKE_MODULES 600
 
 typedef struct {
     int num;
@@ -28,12 +29,16 @@ extern int fake_no_reason24, fake_enum_fails, fake_task_calls;
 extern uint32_t fake_free[FAKE_PIECES];
 extern int fake_npieces;
 extern int fake_made, fake_removed, fake_refuse_remove;
+extern int fake_nmodules, fake_module_calls;
 
 void fake_os_reset(void);
 fake_area *fake_add(int num, const char *name, uint32_t base, uint32_t size, uint32_t max, uint32_t flags);
 void fake_remove(const char *name);
 fake_area *fake_find(const char *name);
 void fake_task(const char *name);
+/* A module (OS_Module 12 lists them in order; the same title twice is two
+   instances). NULL: a module whose header has no title. */
+void fake_module(const char *title);
 /* A SWI: 0 = done, 1 = an error */
 int fake_os_swi(int swi, long *r);
 

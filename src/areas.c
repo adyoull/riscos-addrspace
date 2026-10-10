@@ -44,6 +44,45 @@ static void read_tasks(snap_t *s)
     } while (next >= 0 && s->ntasks < TASKS_MAX);
 }
 
+/* The modules' titles (OS_Module 12: each module's base; its title's offset
+   is at base + &10). A module with more than one instance is listed once. */
+static void read_modules(snap_t *s)
+{
+    long r[10], num = 0, inst = 0;
+    s->nmodules = 0;
+    for (int guard = 0; guard < 4 * MODULES_MAX && s->nmodules < MODULES_MAX; guard++) {
+        const uint32_t *hdr;
+        char t[32];
+        int k;
+        memset(r, 0, sizeof(r));
+        r[0] = 12;
+        r[1] = num;
+        r[2] = inst;
+        if (as_swi(OS_Module, r))
+            return;                 /* no more */
+        num = r[1];
+        inst = r[2];
+        hdr = (const uint32_t *)(uintptr_t)r[3];
+        if (!hdr || !hdr[4] || hdr[4] >= (1u << 20))
+            continue;
+        copy_name(t, sizeof(t), (const char *)hdr + hdr[4]);
+        if (!t[0])
+            continue;
+        for (k = 0; k < s->nmodules && strcmp(s->module[k], t); k++)
+            ;
+        if (k == s->nmodules)
+            memcpy(s->module[s->nmodules++], t, sizeof(t));
+    }
+}
+
+/* Modules' areas whose names don't start with the module's title */
+static const struct { const char *name, *module; } module_areas[] = {
+    { "mmap#", "ARMEABISupport" },              /* a program's mmap */
+    { "UnixLib stacks", "ARMEABISupport" },     /* UnixLib programs' stacks */
+    { "Shared Libraries", "SOManager" },
+    { "SO Manager", "SOManager" },
+};
+
 /* The length of a heap's program name: "Iris Heap", "Iris Heap 2" -> 4;
    "Iris MMap" (UnixLib's own mmap areas, before ARMEABISupport) -> 4 with
    *mmap set. 0 = neither. */
@@ -101,6 +140,7 @@ static void classify(const snap_t *s, area_t *a)
     }
     if (!strncmp(a->name, "mmap#", 5)) {    /* ARMEABISupport's, for a program's mmap */
         a->kind = KIND_MMAP;
+        snprintf(a->owner, sizeof(a->owner), "ARMEABISupport");
         return;
     }
     if ((len = program_part(a->name, &mmap)) != 0) {
@@ -125,6 +165,29 @@ static void classify(const snap_t *s, area_t *a)
             if (tl > best && !strncasecmp(a->name, s->task[i], tl) && !isalnum((unsigned char)a->name[tl])) {
                 best = tl;
                 copy_name(a->owner, sizeof(a->owner), s->task[i]);
+            }
+        }
+        if (best)
+            return;
+    }
+    /* a module's: one of those named above, or the longest module title
+       that starts the area's name, as a word */
+    for (size_t i = 0; i < sizeof(module_areas) / sizeof(module_areas[0]); i++) {
+        size_t l = strlen(module_areas[i].name);
+        if (!strncasecmp(a->name, module_areas[i].name, l) && !isalnum((unsigned char)a->name[l])) {
+            a->kind = KIND_MODULE;
+            snprintf(a->owner, sizeof(a->owner), "%s", module_areas[i].module);
+            return;
+        }
+    }
+    {
+        size_t best = 0;
+        for (int i = 0; i < s->nmodules; i++) {
+            size_t ml = strlen(s->module[i]);
+            if (ml > best && !strncasecmp(a->name, s->module[i], ml) && !isalnum((unsigned char)a->name[ml])) {
+                best = ml;
+                a->kind = KIND_MODULE;
+                copy_name(a->owner, sizeof(a->owner), s->module[i]);
             }
         }
     }
@@ -152,6 +215,7 @@ int areas_read(snap_t *s)
         s->clamp[2] = r[3];
     }
     read_tasks(s);
+    read_modules(s);
 
     s->reason24 = 1;
     for (;;) {
@@ -354,7 +418,8 @@ void areas_notes(const area_t *a, char *out, size_t size)
     case KIND_HEAP:         add(out, size, "UnixLib heap"); break;
     case KIND_HEAP_LEFT:    add(out, size, "its program isn't running: left behind?"); break;
     case KIND_UNIXLIB_MMAP: add(out, size, "UnixLib mmap"); break;
-    case KIND_MMAP:         add(out, size, "ARMEABISupport mmap, for a program"); break;
+    case KIND_MMAP:         add(out, size, "a program's mmap"); break;
+    case KIND_MODULE:       add(out, size, "a module's area"); break;
     }
     if (a->flags & DA_PMP) {
         fmt_k(a->phys, k, sizeof(k));
@@ -365,6 +430,23 @@ void areas_notes(const area_t *a, char *out, size_t size)
         add(out, size, "sparse");
     if (a->flags & DA_DOUBLY)
         add(out, size, "doubly mapped: reserves twice its maximum");
+}
+
+void areas_largest(const probe_t *p, long cap, char *out, size_t size)
+{
+    char a[40], b[40];
+    fmt_mb(p->biggest, a, sizeof(a));
+    if (p->refused) {
+        uint32_t under = p->refused;
+        if (cap > 0 && (uint32_t)cap < under)
+            under = (uint32_t)cap;
+        fmt_mb(under, b, sizeof(b));
+        snprintf(out, size, "between %s and %s", a, b);
+    } else if (cap > 0 && p->biggest >= (uint32_t)cap) {
+        snprintf(out, size, "at least %s, the most a new area can reserve", a);
+    } else {
+        snprintf(out, size, "at least %s", a);
+    }
 }
 
 static void clamp_text(long c, char *out, size_t size)
@@ -379,7 +461,7 @@ static void clamp_text(long c, char *out, size_t size)
 
 void areas_write(FILE *f, const snap_t *s, const probe_t *p, const char *when)
 {
-    char a[40], b[40], c[40], notes[160];
+    char a[40], b[40], c[40], notes[160], big[80];
     /* the owners' totals */
     typedef struct { char owner[32]; int n; uint64_t span, size; } owner_t;
     static owner_t by[AREAS_MAX];
@@ -399,19 +481,19 @@ void areas_write(FILE *f, const snap_t *s, const probe_t *p, const char *when)
     }
     if (p) {
         fmt_mb(p->total, a, sizeof(a));
-        fmt_mb(p->biggest, b, sizeof(b));
-        fprintf(f, "Free logical address space (measured): %s%s; room for %d more %s area%s\n", p->full ? "at least " : "",
-                a, p->n_biggest, b, p->n_biggest == 1 ? "" : "s");
+        areas_largest(p, s->clamp[1], big, sizeof(big));
+        fprintf(f, "Free logical address space (measured): %s%s; the largest free piece: %s\n", p->full ? "at least " : "",
+                a, big);
     }
     if (!s->reason24)
         fprintf(f, "(read with OS_DynamicArea 2: a physical memory pool's sizes are physical)\n");
-    fprintf(f, "\n%-5s %-31s %-20s %12s %12s %-10s %s\n", "Area", "Name", "Owner", "Size", "Reserved", "Base", "Notes");
+    fprintf(f, "\n%-10s %-31s %-20s %12s %12s %-10s %s\n", "Area", "Name", "Owner", "Size", "Reserved", "Base", "Notes");
     for (int i = 0; i < s->n; i++) {
         const area_t *r = &s->a[i];
         fmt_k(r->size, a, sizeof(a));
         fmt_k(r->span, b, sizeof(b));
         areas_notes(r, notes, sizeof(notes));
-        fprintf(f, "%-5d %-31s %-20s %12s %12s &%08X  %s\n", r->num, r->name, r->owner, a, b, (unsigned)r->base, notes);
+        fprintf(f, "%-10d %-31s %-20s %12s %12s &%08X  %s\n", r->num, r->name, r->owner, a, b, (unsigned)r->base, notes);
         if (i >= s->n_now)
             continue;
         {
@@ -482,6 +564,7 @@ int areas_probe(probe_t *p, uint32_t piece)
     uint32_t want = piece ? piece : 128u << 20;
     long r[10];
     int n = 0;
+    uint32_t refused = 0;
 
     memset(p, 0, sizeof(*p));
     while (n < PROBE_MAX) {
@@ -496,9 +579,12 @@ int areas_probe(probe_t *p, uint32_t piece)
         if (as_swi(OS_DynamicArea, r)) {
             if (want <= (1u << 20))
                 break;
+            refused = want;
             want /= 2;
             continue;
         }
+        if (!n)
+            p->refused = refused;   /* the first area made is the biggest */
         made[n] = r[1];
         got[n] = (uint32_t)r[5];
         p->total += got[n];

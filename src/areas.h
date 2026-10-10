@@ -16,7 +16,11 @@
  *             whose name starts with a task's name is put down to it. A
  *             UnixLib program's heap is "<name> Heap" (and "<name> Heap 2",
  *             3...): one whose program isn't running was left behind.
- *             Areas numbered below 256 are RISC OS's own.
+ *             Areas numbered below 256 are RISC OS's own. Modules' areas
+ *             are put down to the module: a few by their names
+ *             (module_areas in areas.c: "mmap#N" and "UnixLib stacks" are
+ *             ARMEABISupport's, "Shared Libraries" SOManager's), others
+ *             when a module's title (OS_Module 12) starts the area's name.
  *   changes:  each reading is compared with the one before: new areas,
  *             ones that grew or shrank, and ones that have gone (kept in
  *             the list for a while).
@@ -39,9 +43,11 @@
 
 #define AREAS_MAX   320
 #define TASKS_MAX   128
+#define MODULES_MAX 512
 #define PROBE_MAX   512
 #define PROBE_NAME  "AddrSpace probe"
 
+#define OS_Module                   0x1E
 #define OS_ReadMemMapInfo           0x51
 #define OS_DynamicArea              0x66
 #define TaskManager_EnumerateTasks  0x42681
@@ -54,7 +60,7 @@ const char *as_swi_error(void);
 /* What happened to an area since the reading before */
 enum { CH_NONE, CH_NEW, CH_GREW, CH_SHRANK, CH_GONE };
 /* What it is (as far as can be told) */
-enum { KIND_OTHER, KIND_OS, KIND_HEAP, KIND_HEAP_LEFT, KIND_MMAP, KIND_UNIXLIB_MMAP };
+enum { KIND_OTHER, KIND_OS, KIND_HEAP, KIND_HEAP_LEFT, KIND_MMAP, KIND_UNIXLIB_MMAP, KIND_MODULE };
 /* The list's columns (and what it can be sorted by) */
 enum { COL_NAME, COL_OWNER, COL_SIZE, COL_SPAN, COL_BASE, COL_NOTES, COL_COUNT };
 
@@ -66,7 +72,7 @@ enum { COL_NAME, COL_OWNER, COL_SIZE, COL_SPAN, COL_BASE, COL_NOTES, COL_COUNT }
 typedef struct {
     int num;
     char name[32];
-    char owner[32];         /* a task's name, "RISC OS", or "" */
+    char owner[32];         /* a task's or module's name, "RISC OS", or "" */
     uint32_t base;          /* logical */
     uint32_t size;          /* logical, bytes in it now */
     uint32_t max;           /* logical, the most it can grow to */
@@ -90,6 +96,8 @@ typedef struct {
                                [2] for sparse ones; 0 = not known */
     char task[TASKS_MAX][32];
     int ntasks;
+    char module[MODULES_MAX][32];   /* the modules' titles */
+    int nmodules;
     int reason24;           /* read with OS_DynamicArea 24 (else 2) */
 } snap_t;
 
@@ -112,6 +120,9 @@ void areas_notes(const area_t *a, char *out, size_t size);
 typedef struct {
     uint64_t total;         /* bytes free */
     uint32_t biggest;       /* the most one new area could reserve (the cap, if there was room) */
+    uint32_t refused;       /* the size refused just before biggest was made: the largest free
+                               piece is under it. 0 = the first size asked for fitted, so the
+                               largest piece is at least biggest. */
     int n_biggest;          /* how many areas that big there was room for */
     int pieces;             /* areas made, in all */
     int full;               /* stopped at PROBE_MAX areas: there's at least total free */
@@ -120,6 +131,11 @@ typedef struct {
 /* piece: the maximum asked for first (RISC OS gives the least of it and
    its cap). 0 = done; -1 = not one area could be made. */
 int areas_probe(probe_t *p, uint32_t piece);
+
+/* The largest free piece, as text: "between 256MB and 512MB", or "at least
+   128MB" (with ", the most a new area can reserve" when cap, OS_DynamicArea
+   8's R2, is what limited it) */
+void areas_largest(const probe_t *p, long cap, char *out, size_t size);
 
 /* Sizes as text: "131,072K"; "1,234.5MB" */
 void fmt_k(uint64_t bytes, char *out, size_t size);

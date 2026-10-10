@@ -88,7 +88,7 @@ static void test_read(void)
     x = get(&a, "ReelEGL Heap");
     CHECK(x && x->kind == KIND_HEAP && !strcmp(x->owner, "ReelEGL 0.1.27"), "ReelEGL Heap: %s", x ? x->owner : "");
     x = get(&a, "mmap#0");
-    CHECK(x && x->kind == KIND_MMAP && !x->owner[0], "mmap#0");
+    CHECK(x && x->kind == KIND_MMAP && !strcmp(x->owner, "ARMEABISupport"), "mmap#0: %s", x ? x->owner : "");
     x = get(&a, "Netsurf cache");
     CHECK(x && x->kind == KIND_OTHER && !strcmp(x->owner, "NetSurf"), "Netsurf cache: %s", x ? x->owner : "");
     x = get(&a, "Screen copy");
@@ -124,6 +124,72 @@ static void test_read(void)
     CHECK(get(&b, "Big Heap2")->kind == KIND_OTHER, "Big Heap2");
     x = get(&b, "Long program name here Heap 12");
     CHECK(x->kind == KIND_HEAP_LEFT && !strcmp(x->owner, "(Long program name here)"), "long: %s", x->owner);
+}
+
+/* Modules' areas: named in module_areas, or by a module's title */
+static void test_modules(void)
+{
+    const area_t *x;
+    char buf[8192];
+    FILE *f;
+    size_t n;
+    fake_os_reset();
+    fake_module("UtilityModule");
+    fake_module(NULL);                              /* no title: skipped */
+    fake_module("Stream");
+    fake_module("StreamManager");
+    fake_module("StreamManager");                   /* a second instance: listed once */
+    fake_module("SharedSound");
+    fake_module("Filer");
+    fake_module("Cairo");
+    fake_task("Filer");
+    fake_add(300, "UnixLib stacks", 0x40000000u, 2 * MB, 64 * MB, 0x80 | (1u << 20));
+    fake_find("UnixLib stacks")->phys_pages = 512;
+    fake_add(301, "Shared Libraries", 0x44000000u, 1 * MB, 32 * MB, 0x80 | (1u << 20));
+    fake_add(302, "StreamManager heap", 0x46000000u, 64 * K, 4 * MB, 0x80);
+    fake_add(303, "SharedSoundBuffer", 0x47000000u, 64 * K, 1 * MB, 0x80);      /* not "SharedSound" as a word */
+    fake_add(304, "Filer cache", 0x48000000u, 0, 1 * MB, 0x80);                /* the task, not the module */
+    fake_add(305, "mmap#3", 0x49000000u, 4 * K, 4 * K, 0x80);
+    fake_add(306, "cairo surfaces", 0x4A000000u, 0, 8 * MB, 0x80 | (1u << 20)); /* any case */
+    fake_add(307, "unixlib stacksX", 0x4B000000u, 0, 1 * MB, 0x80);            /* not the whole name */
+    fake_add(1919963991, "Wimp sprite pool", 0x4C000000u, 0, 1 * MB, 0x80);    /* (its number's that big) */
+    CHECK(areas_read(&b) == 0 && b.n == 9, "read %d", b.n);
+    CHECK(b.nmodules == 6, "%d modules", b.nmodules);
+    CHECK(fake_module_calls == fake_nmodules + 1, "OS_Module asked %d times", fake_module_calls);
+    x = get(&b, "UnixLib stacks");
+    CHECK(x->kind == KIND_MODULE && !strcmp(x->owner, "ARMEABISupport"), "stacks: %d %s", x->kind, x->owner);
+    x = get(&b, "Shared Libraries");
+    CHECK(x->kind == KIND_MODULE && !strcmp(x->owner, "SOManager"), "Shared Libraries: %s", x->owner);
+    x = get(&b, "StreamManager heap");
+    CHECK(x->kind == KIND_MODULE && !strcmp(x->owner, "StreamManager"), "StreamManager heap: %s", x->owner);
+    x = get(&b, "SharedSoundBuffer");
+    CHECK(x->kind == KIND_OTHER && !x->owner[0], "SharedSoundBuffer: %s", x->owner);
+    x = get(&b, "Filer cache");
+    CHECK(x->kind == KIND_OTHER && !strcmp(x->owner, "Filer"), "Filer cache: %d %s", x->kind, x->owner);
+    x = get(&b, "mmap#3");
+    CHECK(x->kind == KIND_MMAP && !strcmp(x->owner, "ARMEABISupport"), "mmap#3: %s", x->owner);
+    x = get(&b, "cairo surfaces");
+    CHECK(x->kind == KIND_MODULE && !strcmp(x->owner, "Cairo"), "cairo: %s", x->owner);
+    x = get(&b, "unixlib stacksX");
+    CHECK(x->kind == KIND_OTHER && !x->owner[0], "stacksX: %s", x->owner);
+
+    /* Save list: the notes, the owners' totals, and a 10-digit area number in its column */
+    f = tmpfile();
+    areas_write(f, &b, NULL, "now");
+    rewind(f);
+    n = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[n] = 0;
+    fclose(f);
+    CHECK(strstr(buf, "a module's area; physical memory pool (2,048K)"), "UnixLib stacks' notes");
+    CHECK(strstr(buf, "  ARMEABISupport             2 areas"), "ARMEABISupport's total");
+    {
+        const char *h = strstr(buf, "\nArea "), *w = strstr(buf, "\n1919963991 Wimp sprite pool");
+        CHECK(h && strstr(h, "Name") - h == 12, "the heading's Name column");
+        CHECK(w && strstr(w, "Wimp") - w == 12, "a 10-digit number's row: Name in the same column");
+        /* "%-10s %-31s %-20s %12s %12s %-10s %s": 106 letters, after the newline */
+        CHECK(h && strchr(h + 1, '\n') - h == 1 + 106, "the heading's length: %d", h ? (int)(strchr(h + 1, '\n') - h) : -1);
+        CHECK(strstr(buf, "\n302        StreamManager heap "), "302's row");
+    }
 }
 
 static void test_changes(void)
@@ -235,6 +301,7 @@ static void test_probe(void)
     CHECK(p.total == 1300 * MB, "free %llu MB", (unsigned long long)(p.total >> 20));
     CHECK(p.biggest == 128 * MB && p.n_biggest == 2 + 7, "%u MB x %d", (unsigned)(p.biggest >> 20), p.n_biggest);
     CHECK(!p.full && !p.left, "full %d left %d", p.full, p.left);
+    CHECK(p.refused == 0, "the first size fitted: refused %u", (unsigned)p.refused);
     CHECK(fake_made == p.pieces && fake_removed == p.pieces, "made %d removed %d", fake_made, fake_removed);
     CHECK(fake_free[0] == 300 * MB && fake_free[1] == 1000 * MB, "all given back");
     for (int i = 0; i < fake_nareas; i++)
@@ -246,6 +313,38 @@ static void test_probe(void)
     CHECK(p.total == 1300 * MB && p.biggest == 32 * MB && p.n_biggest == 9 + 31, "capped: %u x %d",
           (unsigned)(p.biggest >> 20), p.n_biggest);
     fake_clamp[1] = 128 << 20;
+
+    /* Chris's: a 1GB cap, 446MB free in two pieces. 1GB and 512MB don't
+       fit, so the largest piece is at least 256MB but under 512MB. */
+    {
+        char t[96];
+        fake_clamp[1] = 1 << 30;
+        fake_free[0] = 256 * MB;
+        fake_free[1] = 190 * MB;
+        areas_probe(&p, 1u << 30);
+        CHECK(p.total == 446 * MB && p.biggest == 256 * MB && p.refused == 512 * MB, "Chris's: %u MB, %u MB, refused %u MB",
+              (unsigned)(p.total >> 20), (unsigned)(p.biggest >> 20), (unsigned)(p.refused >> 20));
+        areas_largest(&p, 1 << 30, t, sizeof(t));
+        CHECK(!strcmp(t, "between 256MB and 512MB"), "%s", t);
+        fake_clamp[1] = 128 << 20;
+        /* refused bigger than the cap (a size asked for over it): the cap is the limit */
+        p.biggest = 64 * MB;
+        p.refused = 256 * MB;
+        areas_largest(&p, 96 << 20, t, sizeof(t));
+        CHECK(!strcmp(t, "between 64MB and 96MB"), "%s", t);
+        /* the first size fitted: at least that, and it's the cap */
+        p.refused = 0;
+        p.biggest = 128 * MB;
+        areas_largest(&p, 128 << 20, t, sizeof(t));
+        CHECK(!strcmp(t, "at least 128MB, the most a new area can reserve"), "%s", t);
+        /* ...with no cap (or one bigger) */
+        p.biggest = 512 * MB;
+        areas_largest(&p, -1, t, sizeof(t));
+        CHECK(!strcmp(t, "at least 512MB"), "%s", t);
+        areas_largest(&p, 0, t, sizeof(t));
+        CHECK(!strcmp(t, "at least 512MB"), "%s", t);
+        fake_free[1] = 0;
+    }
 
     /* nothing free */
     fake_free[0] = fake_free[1] = 0;
@@ -295,7 +394,9 @@ static void test_text(void)
     fclose(f);
     CHECK(strstr(buf, "Dynamic areas: 12, reserving"), "totals");
     CHECK(strstr(buf, "A new area can reserve at most: 128MB"), "the cap");
-    CHECK(strstr(buf, "Free logical address space (measured): 256MB; room for 2 more 128MB areas"), "free");
+    CHECK(strstr(buf, "Free logical address space (measured): 256MB; the largest free piece: at least 128MB, the most a "
+                      "new area can reserve\n"), "free");
+    CHECK(strstr(buf, "\nArea       Name ") && strstr(buf, "\n300        Matinee Heap "), "the Area column");
     CHECK(strstr(buf, "By owner"), "by owner");
     {
         const char *m = strstr(buf, "\n  Matinee ");
@@ -327,6 +428,7 @@ static void test_text(void)
 int main(void)
 {
     test_read();
+    test_modules();
     test_changes();
     test_sort();
     test_probe();

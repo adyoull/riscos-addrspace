@@ -330,7 +330,8 @@ static int poll_script(int *block, int *reason)
     case 8:
         CHECK(ui_test_probe() && ui_test_probe()->total == 700 * MB, "measured");
         CHECK(fake_nareas == 5 + 0, "the probe's areas went: %d", fake_nareas);
-        CHECK(strstr(ui_test_line(1), "700MB. Room for 5 more areas of 128MB."), "%s", ui_test_line(1));
+        CHECK(strstr(ui_test_line(1), "700MB. The largest free piece: at least 128MB, the most a new area can reserve."),
+              "%s", ui_test_line(1));
         block[0] = MB_EVERY; block[1] = 2; block[2] = -1;
         return 9;
     case 9:
@@ -343,6 +344,7 @@ static int poll_script(int *block, int *reason)
         CHECK(file_has(path, "AddrSpace 0.1"), "saved");
         CHECK(file_has(path, "By owner"), "by owner");
         CHECK(file_has(path, "Free logical address space (measured): 700MB"), "free");
+        CHECK(file_has(path, "700MB; the largest free piece: at least 128MB"), "the largest free piece");
         CHECK(strstr(cli, "Filer_Run ") && strstr(cli, "AddrSpaceList"), "opened: %s", cli);
         block[0] = MB_LOG; block[1] = -1;
         return 9;
@@ -357,20 +359,26 @@ static int poll_script(int *block, int *reason)
     case 12:
         snprintf(path, sizeof(path), "%s/AddrSpaceLog", outdir);
         CHECK(file_has(path, "Iris Heap") && file_has(path, "new; UnixLib heap"), "logged");
+        block[0] = MB_MEASURE; block[1] = -1;
+        return 9;
+    case 13:
+        snprintf(path, sizeof(path), "%s/AddrSpaceLog", outdir);
+        CHECK(file_has(path, "  free: 700MB; the largest free piece: at least 128MB, the most a new area can reserve\n"),
+              "the measurement logged");
         /* closed: still read, for the log */
         block[0] = win_handle;
         return 3;
-    case 13:
+    case 14:
         CHECK(!win_open && closes == 1, "closed");
         CHECK(last_reason == 0x400E1, "logging: PollIdle while closed");
         CHECK(strstr(ui_test_line(2), "changes are logged"), "%s", ui_test_line(2));
         block[0] = MB_LOG; block[1] = -1;
         return 9;
-    case 14:
+    case 15:
         CHECK(!ui_test_logging(), "not logging");
         block[0] = 0;
         return 0;
-    case 15:
+    case 16:
         CHECK(last_reason == 0x400C7, "closed, not logging: Wimp_Poll");
         block[0] = 256; block[4] = 0;       /* Message_Quit */
         return 17;
@@ -396,7 +404,7 @@ int main(int argc, char **argv)
     }
     machine();
     CHECK(addrspace_main(0, NULL) == 0, "quit");
-    CHECK(step == 16, "the script: %d steps", step);
+    CHECK(step == 17, "the script: %d steps", step);
     CHECK(!idle_bad, "PollIdle with nulls masked");
     printf("ui_test: %d checks, %d failed\n", checks, fails);
     return fails != 0;

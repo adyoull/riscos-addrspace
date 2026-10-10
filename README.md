@@ -12,14 +12,17 @@ is really left.
 
 - **The list:** Name, Owner, Size, Reserved, Base and Notes, read again every
   few seconds. Click a heading to sort.
-- **Owners:** the running task whose name the area's starts with, or RISC OS
-  for its own areas. A UnixLib program's heap (`<program> Heap`, `Heap 2`...)
-  whose program isn't running is marked "left behind?".
+- **Owners:** the running task whose name the area's starts with, RISC OS for
+  its own areas, or a module: ARMEABISupport for `mmap#N` and `UnixLib
+  stacks`, SOManager for `Shared Libraries`, or the module whose name the
+  area's starts with (StreamManager's `StreamManager heap`). A UnixLib
+  program's heap (`<program> Heap`, `Heap 2`...) whose program isn't running
+  is marked "left behind?".
 - **Changes:** new areas, ones that grew or shrank, and ones that have gone,
   coloured for 30 seconds.
 - **Measure free space:** makes empty areas, each as big as RISC OS allows,
   until no more fit, adds up their sizes and removes them. This gives the free
-  space and how many more areas of the largest size would fit.
+  space and the largest free piece (the biggest area that would fit).
 - **Save list** and **Log changes:** plain text, to send with a report.
 
 AddrSpace makes no dynamic area of its own (its memory is in its WimpSlot),

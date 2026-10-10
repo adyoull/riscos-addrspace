@@ -22,6 +22,8 @@ int fake_task_calls;
 uint32_t fake_free[FAKE_PIECES];        /* the free pieces of address space */
 int fake_npieces;
 int fake_made, fake_removed, fake_refuse_remove;
+int fake_nmodules, fake_module_calls;
+static struct { uint32_t hdr[5]; char title[32]; } fake_modules[FAKE_MODULES];   /* a module's header: title offset at &10 */
 static int next_num = 1000;
 
 void fake_os_reset(void)
@@ -32,6 +34,7 @@ void fake_os_reset(void)
     fake_no_reason24 = fake_enum_fails = fake_task_calls = 0;
     fake_npieces = 0;
     fake_made = fake_removed = fake_refuse_remove = 0;
+    fake_nmodules = fake_module_calls = 0;
     next_num = 1000;
 }
 
@@ -71,9 +74,27 @@ void fake_task(const char *name)
     snprintf(fake_tasks[fake_ntasks++], sizeof(fake_tasks[0]), "%s", name);
 }
 
+void fake_module(const char *title)
+{
+    memset(&fake_modules[fake_nmodules], 0, sizeof(fake_modules[0]));
+    if (title) {
+        fake_modules[fake_nmodules].hdr[4] = 5 * 4;
+        snprintf(fake_modules[fake_nmodules].title, sizeof(fake_modules[0].title), "%s", title);
+    }
+    fake_nmodules++;
+}
+
 int fake_os_swi(int swi, long *r)
 {
     switch (swi) {
+    case 0x1E:                          /* OS_Module 12: enumerate, R1 = which (the instance in R2 is 0 here) */
+        fake_module_calls++;
+        if (r[0] != 12 || r[1] < 0 || r[1] >= fake_nmodules)
+            return 1;                   /* "No more modules" */
+        r[3] = (long)(uintptr_t)fake_modules[r[1]].hdr;
+        r[1]++;
+        r[2] = 0;
+        return 0;
     case 0x51:                          /* OS_ReadMemMapInfo */
         r[0] = 4096;
         r[1] = 1 << 20;                 /* 4GB */
