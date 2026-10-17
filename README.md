@@ -36,17 +36,29 @@ so it doesn't change what it shows.
 ## Building
 
 Cross-compiled with GCCSDK's GCC 10.2 (`arm-riscos-gnueabihf`) and UnixLib
-5.0.3.3:
+5.0.3.3, most easily in [riscos-crossdev](https://github.com/adyoull/riscos-crossdev)'s
+container image (the version `.riscos-deps` names):
 
 ```
-sh build/build.sh       # build/out/!RunImage,ff8, with its checks
-sh build/package.sh     # dist/AddrSpace-<version>.zip
-sh tests/host/run.sh    # host tests (arm-linux under qemu-arm)
+docker run --rm -v "$PWD":/src ghcr.io/adyoull/riscos-crossdev:1.8.1 \
+  sh -c 'sh build/build.sh && sh build/package.sh && sh tests/host/run.sh'
 ```
 
-`build/env.sh` says where the toolchain is (`GCCSDK_ENV`, `CROSS`, `ELF2AIF`).
+- `build/build.sh` makes `build/out/!RunImage,ff8` and checks it.
+- `build/package.sh` makes `dist/AddrSpace-<version>.zip`.
+- `tests/host/run.sh` runs the host tests (arm-linux under qemu-arm-aligntrap, or qemu-arm).
+
+`build/env.sh` finds the toolchain:
+- riscos-crossdev's (`RISCOS_TOOLCHAIN`), else `~/gccsdk/env`;
+- or set `GCCSDK_ENV`, `CROSS` and `ELF2AIF`.
+
 `build.sh` checks that every large stack frame is probed, that the program was
-linked with UnixLib 5.0.3.3, and that it has no heap dynamic area.
+linked with UnixLib 5.0.3.3, and that it has no heap dynamic area. Where
+riscos-crossdev is installed, it also runs its `checks/check-all.sh`.
+
+GitHub builds every push in that image (`.github/workflows/riscos-build.yml`).
+Every day, `riscos-deps-update.yml` looks for a newer riscos-crossdev release
+and opens a pull request to move to it, built and tested.
 
 ## Source
 

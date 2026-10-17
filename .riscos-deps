@@ -1,0 +1,6 @@
+# NAME TAG: the releases of the owner's repositories (github.com/adyoull)
+# AddrSpace is built with. .github/workflows/riscos-deps-update.yml checks
+# every day for newer ones and opens a pull request (riscos-crossdev's
+# docs/CI.md). riscos-crossdev also chooses the container image the build
+# runs in: GCCSDK GCC 10.2 with riscos-unixlib.
+riscos-crossdev v1.8.1

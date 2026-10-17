@@ -7,7 +7,8 @@
 # UnixLib 5.0.3.3, it has no heap dynamic area (no __dynamic_da_name: it
 # mustn't add to what it measures), and no build path or unwanted name is
 # left in the shipped image.
-# Needs the GCCSDK GCC 10.2 toolchain with UnixLib 5.0.3.3 (README.md, Building).
+# Needs the GCCSDK GCC 10.2 toolchain with UnixLib 5.0.3.3: riscos-crossdev's
+# (its container image, or RISCOS_TOOLCHAIN), or one in ~/gccsdk/env (README.md, Building).
 set -e
 . "$(dirname "$0")/env.sh"
 mkdir -p "$OUT"
@@ -22,6 +23,12 @@ echo "checks:"
 python3 "$TOP/tools/check-stack-probes.py" "$OUT/addrspace_g" "${CROSS}objdump" | tail -1 | tee "$OUT/probes.txt"
 grep -q '; 0 without stack probes' "$OUT/probes.txt" || { echo "unprobed stack frames" >&2; exit 1; }
 CROSS=$CROSS sh "$TOP/tools/check-unixlib.sh" "$OUT/addrspace_g"
+# riscos-crossdev's own checks (static, stack probes, FPU level, UnixLib),
+# where it's installed (its container image sets RCD_DIR)
+if [ -n "$RCD_DIR" ] && [ -x "$RCD_DIR/checks/check-all.sh" ]; then
+  "$RCD_DIR/checks/check-all.sh" "$OUT/addrspace_g" | tail -1
+  "$RCD_DIR/checks/check-all.sh" "$OUT/addrspace_g" >/dev/null || { echo "riscos-crossdev's checks failed" >&2; exit 1; }
+fi
 if "${CROSS}nm" "$OUT/addrspace_g" | grep -q ' __dynamic_da_name$'; then
   echo "the program has a heap dynamic area (__dynamic_da_name): it would change what it measures" >&2
   exit 1
