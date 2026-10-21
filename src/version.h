@@ -6,8 +6,8 @@
 #ifndef ADDRSPACE_VERSION_H
 #define ADDRSPACE_VERSION_H
 
-#define ADDRSPACE_VERSION  "0.1.1-test1"
-#define ADDRSPACE_DATE     "10-Oct-2026"
+#define ADDRSPACE_VERSION  "0.1.1-test2"
+#define ADDRSPACE_DATE     "21-Oct-2026"
 #define APP_AUTHOR         "Andrew Youll"
 
 #endif

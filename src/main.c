@@ -100,6 +100,10 @@ static struct {
     char title[40];
     char line[3][200];
     int rows_shown;                 /* the extent's rows */
+    /* What the window shows now, as a hash of each row's and each totals
+       line's text and colours: a reading redraws only what changed */
+    uint32_t shown_row[AREAS_MAX], shown_line[3];
+    int shown_rows;
 } S;
 
 static const int every_s[] = { 1, 2, 5, 10, 30 };
@@ -237,9 +241,12 @@ static void set_extent(void)
     swi(Wimp_SetExtent, &r);
 }
 
+static void shown_update(int redraw);
+
 static void redraw_all(void)
 {
     _kernel_swi_regs r;
+    shown_update(0);
     if (!S.open)
         return;
     r.r[0] = S.win;
@@ -272,7 +279,7 @@ static void refresh(void)
     S.next_cs = now_cs() + S.every * 100;
     make_lines();
     set_extent();
-    redraw_all();
+    shown_update(1);
 }
 
 static void measure(void)
@@ -388,31 +395,103 @@ static void row_colours(const area_t *a, int *fg, int *bg)
     }
 }
 
+/* One cell of a row: its text, colours and justification */
+static void row_cell(const area_t *a, int c, char *t, size_t size, int *fg, int *bg, unsigned *just)
+{
+    int left_behind = a->kind == KIND_HEAP_LEFT && a->change != CH_GONE;
+    row_colours(a, fg, bg);
+    *just = 0;
+    switch (c) {
+    case COL_NAME:  snprintf(t, size, " %s", a->name); break;
+    case COL_OWNER: snprintf(t, size, " %s", a->owner); break;
+    case COL_SIZE:  fmt_k(a->size, t, size - 1); strcat(t, " "); *just = 0x200; break;
+    case COL_SPAN:  fmt_k(a->span, t, size - 1); strcat(t, " "); *just = 0x200; break;
+    case COL_BASE:  snprintf(t, size, " &%08X", (unsigned)a->base); break;
+    case COL_NOTES:
+        t[0] = ' ';
+        areas_notes(a, t + 1, size - 1);
+        break;
+    }
+    if (left_behind && (c == COL_OWNER || c == COL_NOTES))
+        *fg = 11;                       /* red */
+}
+
 static void draw_row(int i, const area_t *a)
 {
     char t[200];
     int y1 = ROWS_Y1 - i * ROW_H, y0 = y1 - ROW_H, fg, bg;
-    row_colours(a, &fg, &bg);
+    unsigned just;
     for (int c = 0; c < COL_COUNT; c++) {
-        unsigned just = 0;
-        int f = fg;
-        switch (c) {
-        case COL_NAME:  snprintf(t, sizeof(t), " %s", a->name); break;
-        case COL_OWNER: snprintf(t, sizeof(t), " %s", a->owner); break;
-        case COL_SIZE:  fmt_k(a->size, t, sizeof(t)); strcat(t, " "); just = 0x200; break;
-        case COL_SPAN:  fmt_k(a->span, t, sizeof(t)); strcat(t, " "); just = 0x200; break;
-        case COL_BASE:  snprintf(t, sizeof(t), " &%08X", (unsigned)a->base); break;
-        case COL_NOTES:
-            t[0] = ' ';
-            areas_notes(a, t + 1, sizeof(t) - 1);
-            if (a->kind == KIND_HEAP_LEFT && a->change != CH_GONE)
-                f = 11;                 /* red */
-            break;
-        }
-        if (c == COL_OWNER && a->kind == KIND_HEAP_LEFT && a->change != CH_GONE)
-            f = 11;
-        text_box(col_x[c], y0, col_x[c + 1] - 4, y1 - 2, t, f, bg, just);
+        row_cell(a, c, t, sizeof(t), &fg, &bg, &just);
+        text_box(col_x[c], y0, col_x[c + 1] - 4, y1 - 2, t, fg, bg, just);
     }
+}
+
+/* ---- redrawing only what changed ---------------------------------------------- */
+
+static uint32_t hash_text(uint32_t h, const char *t)
+{
+    while (*t)
+        h = (h ^ (unsigned char)*t++) * 16777619u;      /* FNV-1a */
+    return (h ^ 0xFF) * 16777619u;
+}
+
+/* What row i shows: its cells' text and colours. Never 0 (0: no row). */
+static uint32_t row_hash(const area_t *a)
+{
+    char t[200];
+    int fg, bg;
+    unsigned just;
+    uint32_t h = 2166136261u;
+    for (int c = 0; c < COL_COUNT; c++) {
+        row_cell(a, c, t, sizeof(t), &fg, &bg, &just);
+        h = hash_text(h, t);
+        h = (h ^ (uint32_t)(fg | bg << 4 | just)) * 16777619u;
+    }
+    return h ? h : 1;
+}
+
+/* Redraws part of the work area, rows y1 (top) down to y0 */
+static void redraw_band(int y0, int y1)
+{
+    _kernel_swi_regs r;
+    r.r[0] = S.win;
+    r.r[1] = 0;
+    r.r[2] = y0;
+    r.r[3] = WA_W;
+    r.r[4] = y1;
+    swi(Wimp_ForceRedraw, &r);
+}
+
+/* Remembers what the window shows; redraws (if it's open and redraw is
+   set) the totals lines and the rows that differ from what it showed,
+   each run of neighbouring rows as one band */
+static void shown_update(int redraw)
+{
+    const snap_t *s = cur();
+    int rows = S.have ? s->n : 0, n = rows > S.shown_rows ? rows : S.shown_rows, run = -1;
+    for (int k = 0; k < 3; k++) {
+        uint32_t h = hash_text(2166136261u, S.line[k]);
+        if (h != S.shown_line[k] && redraw && S.open)
+            redraw_band(-TOP_PAD - (k + 1) * LINE_H, -TOP_PAD - k * LINE_H);
+        S.shown_line[k] = h;
+    }
+    for (int i = 0; i <= n && i < AREAS_MAX; i++) {
+        uint32_t h = i < rows ? row_hash(&s->a[i]) : 0;
+        int changed = i < n && h != S.shown_row[i];
+        if (changed && run < 0)
+            run = i;
+        if (!changed && run >= 0) {     /* rows run..i-1 */
+            if (redraw && S.open)
+                redraw_band(ROWS_Y1 - i * ROW_H, ROWS_Y1 - run * ROW_H);
+            run = -1;
+        }
+        if (i < n)
+            S.shown_row[i] = h;
+    }
+    if (run >= 0 && redraw && S.open)   /* (a full list: the run reaches its end) */
+        redraw_band(ROWS_Y1 - n * ROW_H, ROWS_Y1 - run * ROW_H);
+    S.shown_rows = rows;
 }
 
 static void draw_heading(void)

@@ -30,7 +30,7 @@ static char bar_sprite[16];
 static int win_open, opens, closes;
 static int wstate[9];                   /* handle, vis x0 y0 x1 y1, scroll x y, behind, flags */
 static int extent[4];
-static int forced;
+static int forced, forced_tallest, forced_height;     /* Wimp_ForceRedraw: calls; the tallest band, all bands' height */
 static int *menu_block, menus;
 static char cli[400];
 static int idle_bad;                    /* a PollIdle without a time, or a Poll with nulls while idle */
@@ -145,6 +145,9 @@ _kernel_oserror *_kernel_swi(int swi, _kernel_swi_regs *in, _kernel_swi_regs *ou
     }
     case 0x400D1:                       /* Wimp_ForceRedraw */
         forced++;
+        if (in->r[4] - in->r[2] > forced_tallest)
+            forced_tallest = (int)(in->r[4] - in->r[2]);
+        forced_height += (int)(in->r[4] - in->r[2]);
         return NULL;
     case 0x400D4:                       /* Wimp_CreateMenu */
         menu_block = (int *)(uintptr_t)in->r[1];
@@ -281,19 +284,28 @@ static int poll_script(int *block, int *reason)
         CHECK(plotted_text("131,072K "), "a size");
         CHECK(plotted_text(" &40000000"), "a base");
         CHECK(last_reason == 0x400E1 && last_r2 == 1000 + 200, "PollIdle until the next reading: %d", last_r2);
+        /* time passes, nothing changes */
+        forced = forced_tallest = forced_height = 0;
+        fake_cs += 200;
+        return 0;
+    case 3:
+        CHECK(ui_test_snap() && forced == 0, "read again, nothing changed: nothing redrawn (%d)", forced);
         /* things change; time passes */
         fake_find("Matinee Heap")->size += 8 * MB;
         fake_add(305, "ReelEGL Heap 2", 0x68000000u, 0, 128 * MB, 0x80);
         fake_remove("Iris Heap");
         fake_cs += 200;
         return 0;
-    case 3:
+    case 4:
         s = ui_test_snap();
         CHECK(s && s->n_now == 5 && s->n == 6, "read again: %d %d", s ? s->n_now : -1, s ? s->n : -1);
         CHECK(forced >= 2, "redrawn");
+        /* only what changed: the totals line and rows, not the whole window (6 rows of 40 and 2 lines of 44 at most) */
+        CHECK(forced_tallest > 0 && forced_tallest < 0x1000 && forced_height <= 6 * 40 + 2 * 44,
+              "only what changed redrawn: %d bands, tallest %d, %d in all", forced, forced_tallest, forced_height);
         ask_redraw(block, reason);
         return 1;
-    case 4:
+    case 5:
         p = row_of("ReelEGL Heap 2");
         CHECK(p && p->bg == 10, "new: green");
         p = row_of("Matinee Heap");
@@ -305,7 +317,7 @@ static int poll_script(int *block, int *reason)
         CHECK(ui_test_heading_xy(COL_NAME, &x, &y) == 0, "heading");
         block[0] = x; block[1] = y; block[2] = 4; block[3] = win_handle; block[4] = -1;
         return 6;
-    case 5:
+    case 6:
         CHECK(ui_test_sort(&desc) == COL_NAME && !desc, "sorted by name");
         s = ui_test_snap();
         CHECK(!strcmp(s->a[0].name, "Matinee Heap") && !strcmp(s->a[s->n_now - 1].name, "System heap"), "%s .. %s",
@@ -313,12 +325,12 @@ static int poll_script(int *block, int *reason)
         ui_test_heading_xy(COL_NAME, &x, &y);
         block[0] = x; block[1] = y; block[2] = 4; block[3] = win_handle; block[4] = -1;
         return 6;
-    case 6:
+    case 7:
         CHECK(ui_test_sort(&desc) == COL_NAME && desc, "turned round");
         /* Menu over the window */
         block[0] = 400; block[1] = 600; block[2] = 2; block[3] = win_handle; block[4] = -1;
         return 6;
-    case 7:
+    case 8:
         CHECK(menus == 1 && menu_block, "menu");
         {
             const char *t = (const char *)(uintptr_t)menu_block[7 + MB_MEASURE * 6 + 3];
@@ -327,19 +339,19 @@ static int poll_script(int *block, int *reason)
         }
         block[0] = MB_MEASURE; block[1] = -1;
         return 9;
-    case 8:
+    case 9:
         CHECK(ui_test_probe() && ui_test_probe()->total == 700 * MB, "measured");
         CHECK(fake_nareas == 5 + 0, "the probe's areas went: %d", fake_nareas);
         CHECK(strstr(ui_test_line(1), "700MB. The largest free piece: at least 128MB, the most a new area can reserve."),
               "%s", ui_test_line(1));
         block[0] = MB_EVERY; block[1] = 2; block[2] = -1;
         return 9;
-    case 9:
+    case 10:
         CHECK(ui_test_every() == 5, "every %d", ui_test_every());
         CHECK(strstr(ui_test_line(2), "Read every 5 s"), "%s", ui_test_line(2));
         block[0] = MB_SAVE; block[1] = -1;
         return 9;
-    case 10:
+    case 11:
         snprintf(path, sizeof(path), "%s/AddrSpaceList", outdir);
         CHECK(file_has(path, "AddrSpace 0.1"), "saved");
         CHECK(file_has(path, "By owner"), "by owner");
@@ -348,7 +360,7 @@ static int poll_script(int *block, int *reason)
         CHECK(strstr(cli, "Filer_Run ") && strstr(cli, "AddrSpaceList"), "opened: %s", cli);
         block[0] = MB_LOG; block[1] = -1;
         return 9;
-    case 11:
+    case 12:
         CHECK(ui_test_logging(), "logging");
         snprintf(path, sizeof(path), "%s/AddrSpaceLog", outdir);
         CHECK(file_has(path, "logging from") && file_has(path, "Changes:"), "the log's start");
@@ -356,29 +368,29 @@ static int poll_script(int *block, int *reason)
         fake_task("Iris");
         fake_cs += 500;
         return 0;
-    case 12:
+    case 13:
         snprintf(path, sizeof(path), "%s/AddrSpaceLog", outdir);
         CHECK(file_has(path, "Iris Heap") && file_has(path, "new; UnixLib heap"), "logged");
         block[0] = MB_MEASURE; block[1] = -1;
         return 9;
-    case 13:
+    case 14:
         snprintf(path, sizeof(path), "%s/AddrSpaceLog", outdir);
         CHECK(file_has(path, "  free: 700MB; the largest free piece: at least 128MB, the most a new area can reserve\n"),
               "the measurement logged");
         /* closed: still read, for the log */
         block[0] = win_handle;
         return 3;
-    case 14:
+    case 15:
         CHECK(!win_open && closes == 1, "closed");
         CHECK(last_reason == 0x400E1, "logging: PollIdle while closed");
         CHECK(strstr(ui_test_line(2), "changes are logged"), "%s", ui_test_line(2));
         block[0] = MB_LOG; block[1] = -1;
         return 9;
-    case 15:
+    case 16:
         CHECK(!ui_test_logging(), "not logging");
         block[0] = 0;
         return 0;
-    case 16:
+    case 17:
         CHECK(last_reason == 0x400C7, "closed, not logging: Wimp_Poll");
         block[0] = 256; block[4] = 0;       /* Message_Quit */
         return 17;
@@ -404,7 +416,7 @@ int main(int argc, char **argv)
     }
     machine();
     CHECK(addrspace_main(0, NULL) == 0, "quit");
-    CHECK(step == 17, "the script: %d steps", step);
+    CHECK(step == 18, "the script: %d steps", step);
     CHECK(!idle_bad, "PollIdle with nulls masked");
     printf("ui_test: %d checks, %d failed\n", checks, fails);
     return fails != 0;
