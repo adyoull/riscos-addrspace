@@ -3,4 +3,4 @@
 # every day for newer ones and opens a pull request (riscos-crossdev's
 # docs/CI.md). riscos-crossdev also chooses the container image the build
 # runs in: GCCSDK GCC 10.2 with riscos-unixlib.
-riscos-crossdev v1.8.1
+riscos-crossdev v1.8.2
